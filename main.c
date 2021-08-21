@@ -35,6 +35,7 @@ static void wifi_wps_cb(int status)
 	os_printf("WPS is connected.");
 	break;
     default:
+	wifi_wps_disable();
 	wps_enabled = 0;
 	os_printf("WPS failed with status code %d\n", status);
 	break;
