@@ -21,22 +21,89 @@ static os_timer_t os_timer;
  * The LED will switch off.
  */
 
-static volatile uint16_t bounces = 0xFFFF;
-static volatile uint32_t button_pressed_at = 0;
-static volatile uint8_t wps_enabled = 0;
+struct Button
+{
+    uint32_t pin;
+    uint16_t bounces;
+    uint32_t down;
+    uint32_t up;
+    uint32_t longpress;
+    uint32_t timestamp;
+};
+
+struct Wifi
+{
+    uint32_t mode;
+    uint32_t wps_enabled;
+};
+
+static struct Button button = {0};
+static struct Wifi wifi = {0};
+
+void ICACHE_FLASH_ATTR button_init(struct Button *button)
+{
+    gpio_init();
+    button->pin = BUTTON_PIN;
+    button->bounces = 0xFFFF;
+    button->down = 0;
+    button->up = 0;
+    button->longpress = 0;
+    button->timestamp = 0;
+    GPIO_DIS_OUTPUT(button->pin);
+}
+
+void ICACHE_FLASH_ATTR button_read(struct Button *button)
+{
+    button->bounces = (button->bounces << 1) | (uint16_t)GPIO_INPUT_GET(button->pin);
+    button->longpress = button->down && (system_get_time() - button->timestamp > 5000000);
+    button->up = button->down && (button->bounces > 0xF000);
+    button->down = (button->bounces < 0xF000);
+    if (button->down) {
+	if (!button->timestamp)
+	    button->timestamp = system_get_time();
+    } else
+	button->timestamp = 0;
+}
+
+static ICACHE_FLASH_ATTR void wifi_init(struct Wifi *wifi)
+{
+    wifi->mode = STATION_MODE;
+    wifi->wps_enabled = 0;
+    wifi_wps_disable();
+}
+
+static void wifi_wps_cb(int status);
+
+/*
+ * Toggles the WiFi WPS state.
+ */
+static ICACHE_FLASH_ATTR void wifi_wps_toggle(struct Wifi *wifi)
+{
+    wifi_set_opmode(wifi->mode);
+    wifi_wps_disable();
+    if (!wifi->wps_enabled) {
+	wifi->wps_enabled =  wifi_wps_enable(WPS_TYPE_PBC) && wifi_wps_start();
+	wifi_set_wps_cb(wifi_wps_cb);
+    } else
+	wifi->wps_enabled = 0;
+}
+
+static ICACHE_FLASH_ATTR void wifi_connect(struct Wifi *wifi)
+{
+    wifi_wps_disable();
+    wifi_station_connect();
+    wifi->wps_enabled = 0;
+}
 
 static void wifi_wps_cb(int status)
 {
     switch (status) {
     case WPS_CB_ST_SUCCESS:
-	wifi_wps_disable();
-	wifi_station_connect();
-	wps_enabled = 0;
+	wifi_connect(&wifi);
 	os_printf("WPS is connected.");
 	break;
     default:
-	wifi_wps_disable();
-	wps_enabled = 0;
+	wifi_init(&wifi);
 	os_printf("WPS failed with status code %d\n", status);
 	break;
     }
@@ -44,42 +111,21 @@ static void wifi_wps_cb(int status)
 
 static void main_on_timer(void *arg)
 {
-    uint32_t now = system_get_time();
-    uint32_t button_pressed = 0;
-    uint32_t button_state = GPIO_INPUT_GET(BUTTON_PIN);
-
-    bounces = (bounces << 1) | button_state;
-    button_pressed = bounces < 0xFF00;
-    if (button_pressed) {
-	if (button_pressed_at == 0)
-	    button_pressed_at = now;
-	else if (now - button_pressed_at >= 5000000) {
-	    if (!wps_enabled) {
-		wps_enabled = wifi_wps_enable(WPS_TYPE_PBC);
-		if (wps_enabled) {
-		    wifi_set_wps_cb(wifi_wps_cb);
-		    if (wifi_wps_start())
-			os_printf("WPS is started\n");
-		    else
-			os_printf("WPS cannot be started\n");
-		} else
-		    os_printf("WPS cannot be enabled\n");
-	    } else {
-		wifi_wps_disable();
-		wps_enabled = 0;
-		os_printf("WPS is disabled\n");
-	    }
-	    button_pressed_at = 0;
+    button_read(&button);
+    if (button.longpress && button.up) {
+	if (!wifi.wps_enabled) {
+	    wifi_wps_toggle(&wifi);
+	    if (wifi.wps_enabled)
+		os_printf("WPS is started\n");
+	    else
+		os_printf("WPS cannot be started\n");
+	} else {
+	    wifi_wps_toggle(&wifi);
+	    os_printf("WPS is disabled\n");
 	}
-    } else
-	button_pressed_at = 0;
-    GPIO_OUTPUT_SET(LED_PIN, wps_enabled);
-    os_timer_arm(&os_timer, 100, 0);
-}
-
-static void configure_wifi()
-{
-    wifi_set_opmode(STATION_MODE);
+    }
+    GPIO_OUTPUT_SET(LED_PIN, button.longpress | wifi.wps_enabled);
+#endif
 }
 
 void ICACHE_FLASH_ATTR user_init(void)
@@ -89,12 +135,10 @@ void ICACHE_FLASH_ATTR user_init(void)
      */
     uart_init(BIT_RATE_921600, BIT_RATE_921600);
 
-    gpio_init();
-    GPIO_DIS_OUTPUT(BUTTON_PIN);
-
-    configure_wifi();
+    button_init(&button);
+    wifi_init(&wifi);
 
     os_timer_disarm(&os_timer);
     os_timer_setfn(&os_timer, &main_on_timer, (void *)NULL);
-    os_timer_arm(&os_timer, 100, 0);
+    os_timer_arm(&os_timer, 10, 1);
 }
