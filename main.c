@@ -34,7 +34,7 @@ struct Button
 struct Wifi
 {
     uint32_t mode;
-    uint32_t wps_enabled;
+    uint32_t wps_started;
 };
 
 struct Board
@@ -78,7 +78,7 @@ void ICACHE_FLASH_ATTR button_read(struct Button *button)
 static ICACHE_FLASH_ATTR void wifi_init(struct Wifi *wifi)
 {
     wifi->mode = STATION_MODE;
-    wifi->wps_enabled = 0;
+    wifi->wps_started = 0;
     wifi_wps_disable();
 }
 
@@ -91,18 +91,18 @@ static ICACHE_FLASH_ATTR void wifi_wps_toggle(struct Wifi *wifi)
 {
     wifi_set_opmode(wifi->mode);
     wifi_wps_disable();
-    if (!wifi->wps_enabled) {
-	wifi->wps_enabled =  wifi_wps_enable(WPS_TYPE_PBC) && wifi_wps_start();
+    if (!wifi->wps_started) {
+	wifi->wps_started =  wifi_wps_enable(WPS_TYPE_PBC) && wifi_wps_start();
 	wifi_set_wps_cb(wifi_wps_cb);
     } else
-	wifi->wps_enabled = 0;
+	wifi->wps_started = 0;
 }
 
 static ICACHE_FLASH_ATTR void wifi_connect(struct Wifi *wifi)
 {
     wifi_wps_disable();
     wifi_station_connect();
-    wifi->wps_enabled = 0;
+    wifi->wps_started = 0;
 }
 
 static ICACHE_FLASH_ATTR void board_init(struct Board *board, struct Button *button, struct Wifi *wifi)
@@ -115,18 +115,18 @@ static ICACHE_FLASH_ATTR void board_tick(struct Board *board)
 {
     button_read(board->button);
     if (board->button->longpress && board->button->up) {
-	if (!board->wifi->wps_enabled) {
+	if (!board->wifi->wps_started) {
 	    wifi_wps_toggle(board->wifi);
-	    if (board->wifi->wps_enabled)
-		os_printf("WPS is started\n");
+	    if (board->wifi->wps_started)
+		os_printf("WPS is started.\n");
 	    else
-		os_printf("WPS cannot be started\n");
+		os_printf("WPS cannot be started.\n");
 	} else {
 	    wifi_wps_toggle(board->wifi);
-	    os_printf("WPS is disabled\n");
+	    os_printf("WPS is disabled.\n");
 	}
     }
-    GPIO_OUTPUT_SET(LED_PIN, board->button->longpress | board->wifi->wps_enabled);
+    GPIO_OUTPUT_SET(LED_PIN, board->button->longpress | board->wifi->wps_started);
 }
 
 static void wifi_wps_cb(int status)
@@ -134,11 +134,11 @@ static void wifi_wps_cb(int status)
     switch (status) {
     case WPS_CB_ST_SUCCESS:
 	wifi_connect(&wifi);
-	os_printf("WPS is connected.");
+	os_printf("WPS is connected.\n");
 	break;
     default:
 	wifi_init(&wifi);
-	os_printf("WPS failed with status code %d\n", status);
+	os_printf("WPS failed with status code %d.\n", status);
 	break;
     }
 }
@@ -150,11 +150,7 @@ static void main_on_timer(void *arg)
 
 void ICACHE_FLASH_ATTR user_init(void)
 {
-    /* UART0 is the default debugging interface, so we must initialise UART
-     * with the desired baud rate
-     */
     uart_init(BIT_RATE_921600, BIT_RATE_921600);
-
     button_init(&button);
     wifi_init(&wifi);
     board_init(&board, &button, &wifi);
