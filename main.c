@@ -63,16 +63,13 @@ void ICACHE_FLASH_ATTR button_read(struct Button *button)
 {
     button->bounces = (button->bounces << 1) | (uint16_t)GPIO_INPUT_GET(button->pin);
     button->up = button->down && (button->bounces > 0xF000);
+    button->longpress = button->down && (system_get_time() - button->timestamp > 5000000);
     button->down = (button->bounces < 0xF000);
-    if (button->down)
+    if (button->down) {
 	if (!button->timestamp)
 	    button->timestamp = system_get_time();
-	else
-	    button->longpress = button->down && (system_get_time() - button->timestamp > 5000000);
-    else {
+    } else
 	button->timestamp = 0;
-	button->longpress = 0;
-    }
 }
 
 static ICACHE_FLASH_ATTR void wifi_init(struct Wifi *wifi)
