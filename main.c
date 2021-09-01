@@ -37,8 +37,15 @@ struct Wifi
     uint32_t wps_enabled;
 };
 
+struct Board
+{
+    struct Button *button;
+    struct Wifi *wifi;
+};
+
 static struct Button button = {0};
 static struct Wifi wifi = {0};
+static struct Board board = {0};
 
 void ICACHE_FLASH_ATTR button_init(struct Button *button)
 {
@@ -55,14 +62,17 @@ void ICACHE_FLASH_ATTR button_init(struct Button *button)
 void ICACHE_FLASH_ATTR button_read(struct Button *button)
 {
     button->bounces = (button->bounces << 1) | (uint16_t)GPIO_INPUT_GET(button->pin);
-    button->longpress = button->down && (system_get_time() - button->timestamp > 5000000);
     button->up = button->down && (button->bounces > 0xF000);
     button->down = (button->bounces < 0xF000);
-    if (button->down) {
+    if (button->down)
 	if (!button->timestamp)
 	    button->timestamp = system_get_time();
-    } else
+	else
+	    button->longpress = button->down && (system_get_time() - button->timestamp > 5000000);
+    else {
 	button->timestamp = 0;
+	button->longpress = 0;
+    }
 }
 
 static ICACHE_FLASH_ATTR void wifi_init(struct Wifi *wifi)
@@ -95,6 +105,30 @@ static ICACHE_FLASH_ATTR void wifi_connect(struct Wifi *wifi)
     wifi->wps_enabled = 0;
 }
 
+static ICACHE_FLASH_ATTR void board_init(struct Board *board, struct Button *button, struct Wifi *wifi)
+{
+    board->button = button;
+    board->wifi = wifi;
+}
+
+static ICACHE_FLASH_ATTR void board_tick(struct Board *board)
+{
+    button_read(board->button);
+    if (board->button->longpress && board->button->up) {
+	if (!board->wifi->wps_enabled) {
+	    wifi_wps_toggle(board->wifi);
+	    if (board->wifi->wps_enabled)
+		os_printf("WPS is started\n");
+	    else
+		os_printf("WPS cannot be started\n");
+	} else {
+	    wifi_wps_toggle(board->wifi);
+	    os_printf("WPS is disabled\n");
+	}
+    }
+    GPIO_OUTPUT_SET(LED_PIN, board->button->longpress | board->wifi->wps_enabled);
+}
+
 static void wifi_wps_cb(int status)
 {
     switch (status) {
@@ -111,21 +145,7 @@ static void wifi_wps_cb(int status)
 
 static void main_on_timer(void *arg)
 {
-    button_read(&button);
-    if (button.longpress && button.up) {
-	if (!wifi.wps_enabled) {
-	    wifi_wps_toggle(&wifi);
-	    if (wifi.wps_enabled)
-		os_printf("WPS is started\n");
-	    else
-		os_printf("WPS cannot be started\n");
-	} else {
-	    wifi_wps_toggle(&wifi);
-	    os_printf("WPS is disabled\n");
-	}
-    }
-    GPIO_OUTPUT_SET(LED_PIN, button.longpress | wifi.wps_enabled);
-#endif
+    board_tick(&board);
 }
 
 void ICACHE_FLASH_ATTR user_init(void)
@@ -137,6 +157,7 @@ void ICACHE_FLASH_ATTR user_init(void)
 
     button_init(&button);
     wifi_init(&wifi);
+    board_init(&board, &button, &wifi);
 
     os_timer_disarm(&os_timer);
     os_timer_setfn(&os_timer, &main_on_timer, (void *)NULL);
