@@ -1,6 +1,6 @@
-#include "osapi.h"
+#ifndef __MAIN_H__
+#define __MAIN_H__
 
-#ifndef _MAIN_H_
-#define _MAIN_H_
+#include "osapi.h"
 
 #endif
